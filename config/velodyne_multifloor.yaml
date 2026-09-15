@@ -1,6 +1,6 @@
 common:
     lid_topic:  "/velodyne_points"
-    imu_topic:  "/imu/data"      # default: /imu_data
+    imu_topic:  "/imu/data"
 
 preprocess:
     lidar_type: 2                #1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for L515 LiDAR
@@ -10,9 +10,9 @@ preprocess:
     calib_laser: false              # true for KITTI Odometry dataset
 
 mapping:
-    down_sample_size: 0.2 # default: 0.5
+    down_sample_size: 0.5
     max_iteration: 3
-    voxel_size: 1.0 # default: 3.0
+    voxel_size: 3.0
     max_layer: 4                # 4 layer, 0, 1, 2, 3
     layer_point_size: [5, 5, 5, 5, 5]
     plannar_threshold: 0.01
