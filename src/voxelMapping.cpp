@@ -290,6 +290,12 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) {
 }
 
 bool sync_packages(MeasureGroup &meas) {
+  // Drop unusable scans together with their timestamps in both IMU modes.
+  while (!lidar_buffer.empty() && lidar_buffer.front()->size() <= 1) {
+    lidar_buffer.pop_front();
+    time_buffer.pop_front();
+    lidar_pushed = false;
+  }
   if (!imu_en) {
     if (!lidar_buffer.empty()) {
       // cout<<"meas.lidar->points.size(): "<<meas.lidar->points.size()<<endl;
@@ -310,10 +316,6 @@ bool sync_packages(MeasureGroup &meas) {
   /*** push a lidar scan ***/
   if (!lidar_pushed) {
     meas.lidar = lidar_buffer.front();
-    if (meas.lidar->points.size() <= 1) {
-      lidar_buffer.pop_front();
-      return false;
-    }
     meas.lidar_beg_time = time_buffer.front();
     lidar_end_time = meas.lidar_beg_time +
                      meas.lidar->points.back().curvature / double(1000);
@@ -548,6 +550,7 @@ int main(int argc, char **argv) {
   nh.param<bool>("preprocess/calib_laser", calib_laser, false);
   nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);
   nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
+  nh.param<double>("preprocess/scan_rate", p_pre->scan_rate, 10.0);
   nh.param<int>("preprocess/point_filter_num", p_pre->point_filter_num, 2);
 
   // visualization params

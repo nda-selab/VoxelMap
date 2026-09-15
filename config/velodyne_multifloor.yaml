@@ -5,6 +5,7 @@ common:
 preprocess:
     lidar_type: 2                #1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for L515 LiDAR
     scan_line: 16
+    scan_rate: 10.0              # Hz; fallback when per-point time is absent
     blind: 1
     point_filter_num: 1
     calib_laser: false              # true for KITTI Odometry dataset

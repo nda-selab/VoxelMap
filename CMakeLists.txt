@@ -91,3 +91,12 @@ target_link_libraries(voxel_mapping_odom ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 target_include_directories(voxel_mapping_odom PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_velodyne_preprocess tests/test_velodyne_preprocess.cpp src/preprocess.cpp)
+  if(TARGET test_velodyne_preprocess)
+    add_dependencies(test_velodyne_preprocess ${catkin_EXPORTED_TARGETS})
+    target_include_directories(test_velodyne_preprocess PRIVATE src)
+    target_link_libraries(test_velodyne_preprocess ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+  endif()
+endif()

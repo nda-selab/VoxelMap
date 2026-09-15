@@ -1,4 +1,9 @@
 #include "preprocess.h"
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <limits>
+#include <sensor_msgs/point_cloud2_iterator.h>
 
 #define RETURN0 0x00
 #define RETURN0AND1 0x10
@@ -156,37 +161,92 @@ void Preprocess::l515_handler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
   }
 }
 
-#define MAX_LINE_NUM 64
-
+// Velodyne XYZIRT: time is seconds relative to the cloud header stamp.
 void Preprocess::velodyne_handler(
     const sensor_msgs::PointCloud2::ConstPtr &msg) {
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
+  if (msg->width == 0 || msg->height == 0)
+    return;
 
-  pcl::PointCloud<velodyne_ros::Point> pl_orig;
-  pcl::fromROSMsg(*msg, pl_orig);
-  int plsize = pl_orig.points.size();
-  // pl_surf.reserve(plsize);
-  for (int i = 0; i < pl_orig.size(); i++) {
-    PointType added_pt;
-    added_pt.x = pl_orig.points[i].x;
-    added_pt.y = pl_orig.points[i].y;
-    added_pt.z = pl_orig.points[i].z;
-    added_pt.intensity = pl_orig.points[i].intensity;
-    float angle = atan(added_pt.z / sqrt(added_pt.x * added_pt.x +
-                                         added_pt.y * added_pt.y)) *
-                  180 / M_PI;
-    int scanID = 0;
-    if (angle >= -8.83)
-      scanID = int((2 - angle) * 3.0 + 0.5);
-    else
-      scanID = N_SCANS / 2 + int((-8.83 - angle) * 2.0 + 0.5);
+  const auto field = [&](const std::string &name, uint8_t type) {
+    return std::any_of(msg->fields.begin(), msg->fields.end(),
+                       [&](const sensor_msgs::PointField &f) {
+                         return f.name == name && f.datatype == type && f.count == 1;
+                       });
+  };
+  if (!field("x", sensor_msgs::PointField::FLOAT32) ||
+      !field("y", sensor_msgs::PointField::FLOAT32) ||
+      !field("z", sensor_msgs::PointField::FLOAT32) ||
+      !field("intensity", sensor_msgs::PointField::FLOAT32) ||
+      !field("ring", sensor_msgs::PointField::UINT16)) {
+    ROS_ERROR_THROTTLE(5.0, "Velodyne requires float32 x/y/z/intensity and uint16 ring.");
+    return;
+  }
+  const bool has_time = std::any_of(msg->fields.begin(), msg->fields.end(),
+      [](const sensor_msgs::PointField &f) { return f.name == "time"; });
+  if (has_time && !field("time", sensor_msgs::PointField::FLOAT32)) {
+    ROS_ERROR_THROTTLE(5.0, "Velodyne time must be float32 seconds relative to header.stamp.");
+    return;
+  }
+  if (N_SCANS <= 0 || point_filter_num <= 0 ||
+      !std::isfinite(blind) || blind < 0 ||
+      (!has_time && (!std::isfinite(scan_rate) || scan_rate <= 0))) {
+    ROS_ERROR_THROTTLE(5.0, "Invalid Velodyne preprocessing parameters.");
+    return;
+  }
+  given_offset_time = has_time;
+  if (!has_time)
+    ROS_WARN_THROTTLE(5.0, "Velodyne has no time field: estimating from azimuth and preprocess/scan_rate (Hz). Assumes a clockwise full scan starting at the first valid point; use measured point times for accurate deskew.");
 
-    // use [0 50]  > 50 remove outlies
-    if (angle > 2 || angle < -24.33 || scanID > 50 || scanID < 0) {
+  pcl::PointCloud<pcl::PointXYZI> input;
+  pcl::fromROSMsg(*msg, input);
+  sensor_msgs::PointCloud2ConstIterator<uint16_t> ring(*msg, "ring");
+  std::unique_ptr<sensor_msgs::PointCloud2ConstIterator<float>> time;
+  if (has_time)
+    time.reset(new sensor_msgs::PointCloud2ConstIterator<float>(*msg, "time"));
+  pl_surf.reserve(input.size());
+  bool have_start = false;
+  double start_yaw = 0;
+  for (size_t i = 0; i < input.size(); ++i, ++ring) {
+    const double seconds = has_time ? **time : 0.0;
+    if (has_time)
+      ++(*time);
+    const auto &p = input[i];
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+        !std::isfinite(p.intensity) || *ring >= N_SCANS)
+      continue;
+    const double yaw = std::atan2(p.y, p.x);
+    if (!have_start) {
+      start_yaw = yaw;
+      have_start = true;
+    }
+    const double range2 = double(p.x) * p.x + double(p.y) * p.y + double(p.z) * p.z;
+    if (range2 <= blind * blind || i % point_filter_num != 0)
+      continue;
+    double offset_ms = seconds * 1000.0;
+    if (!has_time) {
+      double angle = start_yaw - yaw;
+      if (angle < 0)
+        angle += 2.0 * M_PI;
+      offset_ms = angle / (2.0 * M_PI * scan_rate) * 1000.0;
+    }
+    if (!std::isfinite(offset_ms) || offset_ms < 0 ||
+        offset_ms > std::numeric_limits<float>::max()) {
+      ROS_WARN_THROTTLE(5.0, "Discarding Velodyne points with invalid relative time.");
       continue;
     }
+    PointType added_pt{};
+    added_pt.x = p.x;
+    added_pt.y = p.y;
+    added_pt.z = p.z;
+    added_pt.intensity = p.intensity;
+    added_pt.normal_x = added_pt.normal_y = added_pt.normal_z = 0;
+    added_pt.curvature = offset_ms;
     pl_surf.push_back(added_pt);
   }
+  // Synchronization uses the last point's time as the scan end time.
+  std::stable_sort(pl_surf.begin(), pl_surf.end(),
+      [](const PointType &a, const PointType &b) { return a.curvature < b.curvature; });
 }

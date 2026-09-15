@@ -71,6 +71,7 @@ class Preprocess
   PointCloudXYZI pl_buff[128]; //maximum 128 line lidar
   int lidar_type, point_filter_num, N_SCANS;;
   double blind;
+  double scan_rate = 10.0; // Hz, used only when Velodyne point time is absent
   bool feature_enabled, given_offset_time;
   ros::Publisher pub_full, pub_surf, pub_corn;
     
