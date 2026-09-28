@@ -3,7 +3,6 @@
 #include "voxel_map_util.hpp"
 #include <Eigen/Core>
 #include <common_lib.h>
-#include <csignal>
 #include <cv_bridge/cv_bridge.h>
 #include <fstream>
 #include <geometry_msgs/Vector3.h>
@@ -97,7 +96,7 @@ double last_timestamp_lidar, last_timestamp_imu = -1.0;
 double filter_size_corner_min, filter_size_surf_min, fov_deg;
 double map_incremental_time, kdtree_search_time, total_time, scan_match_time,
     solve_time;
-bool lidar_pushed, flg_reset, flg_exit = false;
+bool lidar_pushed, flg_reset = false;
 bool dense_map_en = true;
 
 deque<PointCloudXYZI::Ptr> lidar_buffer;
@@ -130,12 +129,6 @@ geometry_msgs::Quaternion geoQuat;
 geometry_msgs::PoseStamped msg_body_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
-
-void SigHandle(int sig) {
-  flg_exit = true;
-  ROS_WARN("catch sig %d", sig);
-  sig_buffer.notify_all();
-}
 
 const bool intensity_contrast(PointType &x, PointType &y) {
   return (x.intensity > y.intensity);
@@ -637,18 +630,15 @@ int main(int argc, char **argv) {
     fp_kitti = fopen(result_path.c_str(), "w");
   }
 
-  signal(SIGINT, SigHandle);
-  ros::Rate rate(5000);
-  bool status = ros::ok();
+  // Keep shutdown responsive even when the simulated clock stops.
+  ros::WallRate rate(5000);
 
   // for Plane Map
   bool init_map = false;
   std::unordered_map<VOXEL_LOC, OctoTree *> voxel_map;
   last_rot << 1, 0, 0, 0, 1, 0, 0, 0, 1;
 
-  while (status) {
-    if (flg_exit)
-      break;
+  while (ros::ok()) {
     ros::spinOnce();
     if (sync_packages(Measures)) {
       // std::cout << "sync once" << std::endl;
@@ -1136,7 +1126,6 @@ int main(int argc, char **argv) {
 
       scanIdx++;
     }
-    status = ros::ok();
     rate.sleep();
   }
   return 0;
