@@ -6,6 +6,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <fstream>
 #include <geometry_msgs/Vector3.h>
+#include <iomanip>
 #include <image_transport/image_transport.h>
 #include <livox_ros_driver/CustomMsg.h>
 #include <math.h>
@@ -21,6 +22,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <so3_math.h>
+#include <sstream>
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_datatypes.h>
 #include <tf2_msgs/TFMessage.h>
@@ -503,6 +505,19 @@ void publish_path(const ros::Publisher pubPath) {
   pubPath.publish(path);
 }
 
+template <typename T>
+std::string format_parameter_list(const std::vector<T> &values) {
+  std::ostringstream out;
+  out << std::setprecision(12) << "[";
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i != 0)
+      out << ", ";
+    out << values[i];
+  }
+  out << "]";
+  return out.str();
+}
+
 int main(int argc, char **argv) {
   ros::init(argc, argv, "voxelMapping");
   ros::NodeHandle nh;
@@ -557,10 +572,55 @@ int main(int argc, char **argv) {
   // result params
   nh.param<bool>("Result/write_kitti_log", write_kitti_log, 'false');
   nh.param<string>("Result/result_path", result_path, "");
-  cout << "p_pre->lidar_type " << p_pre->lidar_type << endl;
   for (int i = 0; i < layer_point_size.size(); i++) {
     layer_size.push_back(layer_point_size[i]);
   }
+
+  // Report the values adopted by this node, including parameter defaults.
+  std::ostringstream startup_config;
+  startup_config << std::boolalpha << std::setprecision(12)
+                 << "VoxelMap startup configuration:\n";
+  const auto log_parameter = [&startup_config](const char *name,
+                                                const auto &value) {
+    startup_config << "  " << name << " = " << value << '\n';
+  };
+  log_parameter("common/lid_topic", lid_topic);
+  log_parameter("common/imu_topic", imu_topic);
+  log_parameter("preprocess/lidar_type", p_pre->lidar_type);
+  log_parameter("preprocess/scan_line", p_pre->N_SCANS);
+  log_parameter("preprocess/scan_rate", p_pre->scan_rate);
+  log_parameter("preprocess/blind", p_pre->blind);
+  log_parameter("preprocess/point_filter_num", p_pre->point_filter_num);
+  log_parameter("preprocess/calib_laser", calib_laser);
+  log_parameter("imu/imu_en", imu_en);
+  log_parameter("imu/extrinsic_T", format_parameter_list(extrinT));
+  log_parameter("imu/extrinsic_R", format_parameter_list(extrinR));
+  log_parameter("noise_model/ranging_cov", ranging_cov);
+  log_parameter("noise_model/angle_cov", angle_cov);
+  log_parameter("noise_model/gyr_cov_scale", gyr_cov_scale);
+  log_parameter("noise_model/acc_cov_scale", acc_cov_scale);
+  log_parameter("mapping/max_iteration", NUM_MAX_ITERATIONS);
+  log_parameter("mapping/max_points_size", max_points_size);
+  log_parameter("mapping/max_cov_points_size", max_cov_points_size);
+  log_parameter("mapping/layer_point_size", format_parameter_list(layer_size));
+  log_parameter("mapping/max_layer", max_layer);
+  log_parameter("mapping/voxel_size", max_voxel_size);
+  log_parameter("mapping/down_sample_size", filter_size_surf_min);
+  log_parameter("mapping/plannar_threshold", min_eigen_value);
+  log_parameter("visualization/pub_voxel_map", publish_voxel_map);
+  log_parameter("visualization/publish_max_voxel_layer", publish_max_voxel_layer);
+  log_parameter("visualization/pub_point_cloud", publish_point_cloud);
+  log_parameter("visualization/pub_point_cloud_skip", pub_point_cloud_skip);
+  log_parameter("visualization/dense_map_enable", dense_map_en);
+  log_parameter("Result/write_kitti_log", write_kitti_log);
+  log_parameter("Result/result_path", result_path);
+  log_parameter("/use_sim_time", ros::Time::isSimTime());
+  log_parameter("ROS time source",
+                ros::Time::isSimTime() ? "/clock" : "system time");
+  log_parameter("odometry timestamp",
+                imu_en ? "scan end (cloud header.stamp + max point offset)"
+                       : "scan start (cloud header.stamp)");
+  ROS_INFO_STREAM(startup_config.str());
 
   ros::Subscriber sub_pcl =
       p_pre->lidar_type == AVIA
@@ -606,13 +666,6 @@ int main(int argc, char **argv) {
   extR << extrinR[0], extrinR[1], extrinR[2], extrinR[3], extrinR[4],
       extrinR[5], extrinR[6], extrinR[7], extrinR[8];
   p_imu->set_extrinsic(extT, extR);
-
-  // Current version do not support imu.
-  if (imu_en) {
-    std::cout << "use imu" << std::endl;
-  } else {
-    std::cout << "no imu" << std::endl;
-  }
 
   p_imu->set_gyr_cov_scale(V3D(gyr_cov_scale, gyr_cov_scale, gyr_cov_scale));
   p_imu->set_acc_cov_scale(V3D(acc_cov_scale, acc_cov_scale, acc_cov_scale));
