@@ -467,11 +467,11 @@ template <typename T> void set_posestamp(T &out) {
   out.orientation.w = geoQuat.w;
 }
 
-void publish_odometry(const ros::Publisher &pubOdomAftMapped) {
+void publish_odometry(const ros::Publisher &pubOdomAftMapped,
+                      const ros::Time &stamp) {
   odomAftMapped.header.frame_id = "camera_init";
   odomAftMapped.child_frame_id = "aft_mapped";
-  odomAftMapped.header.stamp =
-      ros::Time::now(); // ros::Time().fromSec(last_timestamp_lidar);
+  odomAftMapped.header.stamp = stamp;
   set_posestamp(odomAftMapped.pose.pose);
   static tf::TransformBroadcaster br;
   tf::Transform transform;
@@ -692,6 +692,14 @@ int main(int argc, char **argv) {
         cout << "FAST-LIO not ready" << endl;
         continue;
       }
+
+      // IMU propagation and deskew use the scan end; without IMU, the
+      // constant-velocity model uses the input cloud's header timestamp.
+      // UndistortPcl sorts points by their relative time (milliseconds).
+      ros::Time odometry_stamp;
+      odometry_stamp.fromSec(
+          Measures.lidar_beg_time +
+          (imu_en ? feats_undistort->points.back().curvature / 1000.0 : 0.0));
 
       flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME
                            ? false
@@ -1050,7 +1058,7 @@ int main(int argc, char **argv) {
       total_time = t_downsample + scan_match_time + solve_time +
                    map_incremental_time + undistort_time + calc_point_cov_time;
       /******* Publish functions:  *******/
-      publish_odometry(pubOdomAftMapped);
+      publish_odometry(pubOdomAftMapped, odometry_stamp);
       publish_path(pubPath);
       tf::Transform transform;
       tf::Quaternion q;
